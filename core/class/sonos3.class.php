@@ -195,8 +195,24 @@ class sonos3 extends eqLogic {
 	
 	public static function syncSonos() {
 		$sonos = self::getSonos(true);
-		$controllers = $sonos->getControllers();
+		try {
+			$controllers = $sonos->getControllers();
+		} catch (\Exception $e) {
+			$eqLogics = eqLogic::byType('sonos3');
+			if(count($eqLogics) == 0){
+				throw $e;
+			}
+			$ips = array();
+			foreach ($eqLogics as $eqLogic) {
+				$ips[] = $eqLogic->getLogicalId();
+			}
+			$controllers = self::getControllerByIp($ips);
+		}
 		$speakers = sonos3::getSpeaker();
+		$speakers_array = array();
+		foreach ($speakers as $speaker) {
+			$speakers_array[$speaker->getIp()] = $speaker->getRoom();
+		}
 		foreach ($controllers as $controller) {
 			$eqLogic = sonos3::byLogicalId($controller->getIp(), 'sonos3');
 			if (!is_object($eqLogic)) {
@@ -230,14 +246,22 @@ class sonos3 extends eqLogic {
 				$eqLogic->setEqType_name('sonos3');
 				$eqLogic->setIsVisible(1);
 				$eqLogic->setIsEnable(1);
+				$eqLogic->save();
 			}
-			$speakers_array = array();
-			foreach ($speakers as $speaker) {
-				$speakers_array[$speaker->getIp()] = $speaker->getRoom();
-			}
-			$eqLogic->setConfiguration('speakers', json_encode($speakers_array));
-			$eqLogic->save();
+			
+			
 		}
+		$eqLogics = eqLogic::byType('sonos3');
+		if(count($eqLogics) != 0){
+			foreach ($eqLogics as $eqLogic) {
+				$eqLogic->setConfiguration('speakers', json_encode($speakers_array));
+				$eqLogic->save();
+			}
+		}
+		
+		self::getRadioStations();
+		self::getPlayLists();
+		self::getFavourites();
 		self::deamon_start();
 	}
 	
@@ -407,9 +431,22 @@ class sonos3 extends eqLogic {
 	public static function getControllerByIp($_ip) {
 		$devices = new \duncan3dc\Sonos\Devices\Collection();
 		$devices->setLogger(log::getLogger('sonos3'));
-		$devices->addIp($_ip);
-		$sonos = new \duncan3dc\Sonos\Network($devices);
-		return $sonos->getControllerByIp($_ip);
+		if(is_array($_ip)){
+			foreach ($_ip as $ip) {
+				$devices->addIp($ip);
+			}
+		}else{
+			$devices->addIp($_ip);
+		}
+		self::$_sonos = new \duncan3dc\Sonos\Network($devices);
+		if(is_array($_ip)){
+			$return = array();
+			foreach ($_ip as $ip) {
+				$return[$ip] = self::$_sonos->getControllerByIp($ip);
+			}
+			return $return;
+		}
+		return self::$_sonos->getControllerByIp($_ip);
 	}
 	
 	/*     * *********************Méthodes d'instance************************* */
@@ -790,14 +827,6 @@ class sonos3 extends eqLogic {
 		$dominantColor->setSubType('string');
 		$dominantColor->setEqLogic_id($this->getId());
 		$dominantColor->save();
-		
-		try {
-			self::getRadioStations();
-			self::getPlayLists();
-			self::getFavourites();
-		} catch (Exception $e) {
-			
-		}
 	}
 	
 	public function toHtml($_version = 'dashboard') {
